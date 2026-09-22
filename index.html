@@ -234,7 +234,7 @@
   }
 
   /* address search */
-  #condoSearchResults{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  #listSearchResults{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
   .search-result{
     padding:10px 12px;background:var(--paper2);border:1.5px solid var(--line);border-radius:9px;
     font-size:13.5px;cursor:pointer;line-height:1.4;
@@ -670,11 +670,30 @@
   }
 
   // ---------- LIST ----------
-  function renderList(){
-    var list = state.condos
+  function filteredCondos(){
+    return state.condos
       .filter(function(c){ return c.cidade === state.currentCity; })
       .filter(function(c){ return !state.search || c.nome.toLowerCase().indexOf(state.search.toLowerCase()) > -1; })
       .sort(function(a,b){ return a.nome.localeCompare(b.nome,'pt-BR'); });
+  }
+
+  function renderList(){
+    var list = filteredCondos();
+    var searchTerm = state.search.trim();
+    var showExternal = searchTerm.length >= 3 && list.length === 0;
+
+    var emptyBlock;
+    if(list.length){
+      emptyBlock = '';
+    } else if(showExternal){
+      emptyBlock = ''
+        + '<div class="empty-hint">Nenhum condomínio com esse nome na sua lista.</div>'
+        + '<div id="listSearchResults"></div>';
+    } else if(searchTerm){
+      emptyBlock = '<div class="empty-hint">Nenhum condomínio com esse nome em '+esc(state.currentCity)+'.</div>';
+    } else {
+      emptyBlock = '<div class="empty-hint">Nenhum condomínio cadastrado em '+esc(state.currentCity)+' ainda.<br>Toque em "Novo condomínio" para começar.</div>';
+    }
 
     return ''
     + '<div class="topbar">'
@@ -684,7 +703,7 @@
     + '</div>'
     + '<main>'
     + '  <div class="field search-bar"><input id="searchInput" placeholder="Buscar condomínio..." value="'+esc(state.search)+'"></div>'
-    +    (list.length ? list.map(renderCard).join('') : '<div class="empty-hint">Nenhum condomínio cadastrado em '+esc(state.currentCity)+' ainda.<br>Toque em "Novo condomínio" para começar.</div>')
+    +    (list.length ? list.map(renderCard).join('') : emptyBlock)
     + '</main>'
     + '<div class="fab-bar"><div class="fab-bar-inner"><button class="btn btn-primary" id="btnNewCondo">+ Novo condomínio</button></div></div>';
   }
@@ -746,7 +765,7 @@
   // ---------- FORM ----------
   function renderForm(){
     var editing = state.editingId ? state.condos.find(function(c){ return c.id === state.editingId; }) : null;
-    var d = editing || { nome:"", endereco:"", tipoEntrega:"portaria", horarioSemana:"", horarioSabado:"", horarioFeriado:"", is24h:false, recebedorNome:"", recebedorDocumento:"", recebedorTelefone:"" };
+    var d = editing || { nome: (formPrefill && formPrefill.nome) || "", endereco: (formPrefill && formPrefill.endereco) || "", tipoEntrega:"portaria", horarioSemana:"", horarioSabado:"", horarioFeriado:"", is24h:false, recebedorNome:"", recebedorDocumento:"", recebedorTelefone:"" };
 
     return ''
     + '<div class="topbar">'
@@ -758,11 +777,6 @@
     + '    <div class="field photo-field"><label>Foto da fachada (toque abaixo para escolher da galeria)</label>'
     + '      <input type="file" id="condoPhotoInput" accept="image/*" class="photo-file-input">'
     + '      <div id="photoPreviewWrap"></div>'
-    + '    </div>'
-    + '    <div class="field" id="condoSearchWrap"><label>Buscar endereço (opcional)</label>'
-    + '      <input type="text" id="condoSearchInput" placeholder="Digite o nome da rua ou do condomínio" autocomplete="off">'
-    + '      <div id="condoSearchResults"></div>'
-    + '      <div class="search-attrib">Busca de endereços via OpenStreetMap — nem todo condomínio será encontrado; se não achar, preencha manualmente abaixo.</div>'
     + '    </div>'
     + '    <div class="field"><label>Nome do condomínio</label><input name="nome" required value="'+esc(d.nome)+'"></div>'
     + '    <div class="field"><label>Endereço</label><input name="endereco" required placeholder="Rua, número, bairro" value="'+esc(d.endereco)+'"></div>'
@@ -794,39 +808,9 @@
     + '</main>';
   }
 
-  var addressSearchTimer = null;
-  var addressSearchResults = [];
-
-  function searchAddress(query){
-    var resultsWrap = document.getElementById("condoSearchResults");
-    if(!resultsWrap) return;
-    resultsWrap.innerHTML = '<div class="search-loading">Buscando...</div>';
-    var q = query + (state.currentCity ? ", " + state.currentCity : "") + ", Brasil";
-    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=5&countrycodes=br&accept-language=pt-BR&q=" + encodeURIComponent(q);
-    fetch(url)
-      .then(function(r){ return r.json(); })
-      .then(function(data){
-        var wrap = document.getElementById("condoSearchResults");
-        if(!wrap) return;
-        addressSearchResults = Array.isArray(data) ? data : [];
-        if(!addressSearchResults.length){
-          wrap.innerHTML = '<div class="search-empty">Nada encontrado. Preencha manualmente abaixo.</div>';
-          return;
-        }
-        wrap.innerHTML = addressSearchResults.map(function(item, i){
-          return '<div class="search-result" data-idx="'+i+'">'+esc(item.display_name)+'</div>';
-        }).join('');
-        wrap.querySelectorAll(".search-result").forEach(function(el){
-          el.addEventListener("click", function(){
-            applyAddressResult(addressSearchResults[Number(el.getAttribute("data-idx"))]);
-          });
-        });
-      })
-      .catch(function(){
-        var wrap = document.getElementById("condoSearchResults");
-        if(wrap) wrap.innerHTML = '<div class="search-empty">Busca indisponível agora. Preencha manualmente.</div>';
-      });
-  }
+  var listSearchTimer = null;
+  var listSearchResultsData = [];
+  var formPrefill = null;
 
   function formatEnderecoFromAddress(addr, fallback){
     if(!addr) return fallback;
@@ -838,21 +822,47 @@
     return partes.length ? partes.join(", ") : fallback;
   }
 
-  function applyAddressResult(item){
-    if(!item) return;
-    var form = document.getElementById("condoForm");
-    if(!form) return;
-    var nomeInput = form.querySelector('input[name="nome"]');
-    var enderecoInput = form.querySelector('input[name="endereco"]');
-    var addr = item.address || {};
-    var nomeGuess = (item.namedetails && item.namedetails.name) || addr.building || "";
-    if(nomeInput && !nomeInput.value.trim() && nomeGuess) nomeInput.value = nomeGuess;
-    if(enderecoInput) enderecoInput.value = formatEnderecoFromAddress(addr, item.display_name);
-    var wrap = document.getElementById("condoSearchResults");
-    if(wrap) wrap.innerHTML = "";
-    var searchInput = document.getElementById("condoSearchInput");
-    if(searchInput) searchInput.value = "";
-    toast("Endereço preenchido. Confira os dados abaixo.", "success");
+  function searchListExternal(query){
+    var wrap = document.getElementById("listSearchResults");
+    if(!wrap) return;
+    wrap.innerHTML = '<div class="search-loading">Buscando sugestões de endereço...</div>';
+    var q = query + (state.currentCity ? ", " + state.currentCity : "") + ", Brasil";
+    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=5&countrycodes=br&accept-language=pt-BR&q=" + encodeURIComponent(q);
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        var wrap2 = document.getElementById("listSearchResults");
+        if(!wrap2) return;
+        listSearchResultsData = Array.isArray(data) ? data : [];
+        if(!listSearchResultsData.length){
+          wrap2.innerHTML = '<div class="search-empty">Nenhuma sugestão de endereço encontrada. Toque em "Novo condomínio" para cadastrar manualmente.</div>';
+          return;
+        }
+        wrap2.innerHTML = listSearchResultsData.map(function(item, i){
+          return '<div class="search-result" data-idx="'+i+'">'+esc(item.display_name)+'</div>';
+        }).join('') + '<div class="search-attrib">Toque numa sugestão para já abrir o cadastro preenchido, ou toque em "Novo condomínio" para preencher manualmente.</div>';
+        wrap2.querySelectorAll(".search-result").forEach(function(el){
+          el.addEventListener("click", function(){
+            openFormWithPrefill(listSearchResultsData[Number(el.getAttribute("data-idx"))]);
+          });
+        });
+      })
+      .catch(function(){
+        var wrap2 = document.getElementById("listSearchResults");
+        if(wrap2) wrap2.innerHTML = '<div class="search-empty">Busca indisponível agora. Toque em "Novo condomínio" para cadastrar manualmente.</div>';
+      });
+  }
+
+  function openFormWithPrefill(item){
+    var addr = (item && item.address) || {};
+    formPrefill = {
+      nome: (item.namedetails && item.namedetails.name) || addr.building || state.search.trim(),
+      endereco: formatEnderecoFromAddress(addr, item.display_name)
+    };
+    state.editingId = null;
+    formPhoto = null;
+    state.view = "form";
+    render();
   }
 
   function handleCondoSubmit(e){
@@ -895,6 +905,8 @@
     state.condos = newCondos;
     state.editingId = null;
     formPhoto = null;
+    formPrefill = null;
+    state.search = "";
     state.view = "list";
     render();
   }
@@ -932,11 +944,22 @@
         render();
         var again = document.getElementById("searchInput");
         if(again){ again.focus(); again.setSelectionRange(pos,pos); }
+
+        clearTimeout(listSearchTimer);
+        var q = state.search.trim();
+        var wrap = document.getElementById("listSearchResults");
+        if(wrap && q.length >= 3){
+          listSearchTimer = setTimeout(function(){ searchListExternal(q); }, 600);
+        }
       });
+    }
+    var listSearchResultsWrap = document.getElementById("listSearchResults");
+    if(listSearchResultsWrap && state.search.trim().length >= 3){
+      searchListExternal(state.search.trim());
     }
 
     var btnNewCondo = document.getElementById("btnNewCondo");
-    if(btnNewCondo) btnNewCondo.addEventListener("click", function(){ state.editingId=null; formPhoto=null; state.view="form"; render(); });
+    if(btnNewCondo) btnNewCondo.addEventListener("click", function(){ state.editingId=null; formPhoto=null; formPrefill=null; state.view="form"; render(); });
 
     document.querySelectorAll("[data-edit]").forEach(function(el){
       el.addEventListener("click", function(){
@@ -944,6 +967,7 @@
         var c = state.condos.find(function(x){ return x.id === id; });
         state.editingId = id;
         formPhoto = (c && c.foto) ? c.foto : null;
+        formPrefill = null;
         state.view="form"; render();
       });
     });
@@ -972,17 +996,6 @@
     if(btnCancelImport) btnCancelImport.addEventListener("click", function(){ state.view = state.currentCity ? "list" : "cities"; render(); });
     var btnDoImport = document.getElementById("btnDoImport");
     if(btnDoImport) btnDoImport.addEventListener("click", handleImport);
-
-    var condoSearchInput = document.getElementById("condoSearchInput");
-    if(condoSearchInput){
-      condoSearchInput.addEventListener("input", function(){
-        var q = condoSearchInput.value.trim();
-        clearTimeout(addressSearchTimer);
-        var wrap = document.getElementById("condoSearchResults");
-        if(q.length < 3){ if(wrap) wrap.innerHTML = ""; return; }
-        addressSearchTimer = setTimeout(function(){ searchAddress(q); }, 600);
-      });
-    }
 
     var condoForm = document.getElementById("condoForm");
     if(condoForm){
@@ -1029,9 +1042,9 @@
     }
 
     var btnCancelForm = document.getElementById("btnCancelForm");
-    if(btnCancelForm) btnCancelForm.addEventListener("click", function(){ state.editingId=null; formPhoto=null; state.view="list"; render(); });
+    if(btnCancelForm) btnCancelForm.addEventListener("click", function(){ state.editingId=null; formPhoto=null; formPrefill=null; state.view="list"; render(); });
     var btnCancelForm2 = document.getElementById("btnCancelForm2");
-    if(btnCancelForm2) btnCancelForm2.addEventListener("click", function(){ state.editingId=null; formPhoto=null; state.view="list"; render(); });
+    if(btnCancelForm2) btnCancelForm2.addEventListener("click", function(){ state.editingId=null; formPhoto=null; formPrefill=null; state.view="list"; render(); });
   }
 
   render();
