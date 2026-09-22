@@ -233,6 +233,16 @@
     border:none;border-radius:100px;width:30px;height:30px;font-size:16px;cursor:pointer;line-height:1;
   }
 
+  /* address search */
+  #condoSearchResults{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .search-result{
+    padding:10px 12px;background:var(--paper2);border:1.5px solid var(--line);border-radius:9px;
+    font-size:13.5px;cursor:pointer;line-height:1.4;
+  }
+  .search-result:active{background:rgba(217,164,65,.15);}
+  .search-loading,.search-empty{font-size:13px;color:var(--ink-soft);margin-top:8px;}
+  .search-attrib{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
+
   /* form */
   fieldset{border:none;padding:0;margin:0 0 20px;}
   legend{font-family:"Space Grotesk";font-size:14px;font-weight:600;color:var(--ink-soft);padding:0 0 10px;text-transform:none;}
@@ -749,6 +759,11 @@
     + '      <input type="file" id="condoPhotoInput" accept="image/*" class="photo-file-input">'
     + '      <div id="photoPreviewWrap"></div>'
     + '    </div>'
+    + '    <div class="field" id="condoSearchWrap"><label>Buscar endereço (opcional)</label>'
+    + '      <input type="text" id="condoSearchInput" placeholder="Digite o nome da rua ou do condomínio" autocomplete="off">'
+    + '      <div id="condoSearchResults"></div>'
+    + '      <div class="search-attrib">Busca de endereços via OpenStreetMap — nem todo condomínio será encontrado; se não achar, preencha manualmente abaixo.</div>'
+    + '    </div>'
     + '    <div class="field"><label>Nome do condomínio</label><input name="nome" required value="'+esc(d.nome)+'"></div>'
     + '    <div class="field"><label>Endereço</label><input name="endereco" required placeholder="Rua, número, bairro" value="'+esc(d.endereco)+'"></div>'
     + '    <fieldset>'
@@ -777,6 +792,67 @@
     + '    </div>'
     + '  </form>'
     + '</main>';
+  }
+
+  var addressSearchTimer = null;
+  var addressSearchResults = [];
+
+  function searchAddress(query){
+    var resultsWrap = document.getElementById("condoSearchResults");
+    if(!resultsWrap) return;
+    resultsWrap.innerHTML = '<div class="search-loading">Buscando...</div>';
+    var q = query + (state.currentCity ? ", " + state.currentCity : "") + ", Brasil";
+    var url = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&namedetails=1&limit=5&countrycodes=br&accept-language=pt-BR&q=" + encodeURIComponent(q);
+    fetch(url)
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        var wrap = document.getElementById("condoSearchResults");
+        if(!wrap) return;
+        addressSearchResults = Array.isArray(data) ? data : [];
+        if(!addressSearchResults.length){
+          wrap.innerHTML = '<div class="search-empty">Nada encontrado. Preencha manualmente abaixo.</div>';
+          return;
+        }
+        wrap.innerHTML = addressSearchResults.map(function(item, i){
+          return '<div class="search-result" data-idx="'+i+'">'+esc(item.display_name)+'</div>';
+        }).join('');
+        wrap.querySelectorAll(".search-result").forEach(function(el){
+          el.addEventListener("click", function(){
+            applyAddressResult(addressSearchResults[Number(el.getAttribute("data-idx"))]);
+          });
+        });
+      })
+      .catch(function(){
+        var wrap = document.getElementById("condoSearchResults");
+        if(wrap) wrap.innerHTML = '<div class="search-empty">Busca indisponível agora. Preencha manualmente.</div>';
+      });
+  }
+
+  function formatEnderecoFromAddress(addr, fallback){
+    if(!addr) return fallback;
+    var rua = addr.road || addr.pedestrian || addr.residential || "";
+    var numero = addr.house_number || "";
+    var bairro = addr.suburb || addr.neighbourhood || addr.quarter || "";
+    var linha1 = rua ? (rua + (numero ? ", " + numero : "")) : "";
+    var partes = [linha1, bairro].filter(function(p){ return p; });
+    return partes.length ? partes.join(", ") : fallback;
+  }
+
+  function applyAddressResult(item){
+    if(!item) return;
+    var form = document.getElementById("condoForm");
+    if(!form) return;
+    var nomeInput = form.querySelector('input[name="nome"]');
+    var enderecoInput = form.querySelector('input[name="endereco"]');
+    var addr = item.address || {};
+    var nomeGuess = (item.namedetails && item.namedetails.name) || addr.building || "";
+    if(nomeInput && !nomeInput.value.trim() && nomeGuess) nomeInput.value = nomeGuess;
+    if(enderecoInput) enderecoInput.value = formatEnderecoFromAddress(addr, item.display_name);
+    var wrap = document.getElementById("condoSearchResults");
+    if(wrap) wrap.innerHTML = "";
+    var searchInput = document.getElementById("condoSearchInput");
+    if(searchInput) searchInput.value = "";
+    toast("Endereço preenchido. Confira os dados abaixo.", "success");
   }
 
   function handleCondoSubmit(e){
@@ -896,6 +972,17 @@
     if(btnCancelImport) btnCancelImport.addEventListener("click", function(){ state.view = state.currentCity ? "list" : "cities"; render(); });
     var btnDoImport = document.getElementById("btnDoImport");
     if(btnDoImport) btnDoImport.addEventListener("click", handleImport);
+
+    var condoSearchInput = document.getElementById("condoSearchInput");
+    if(condoSearchInput){
+      condoSearchInput.addEventListener("input", function(){
+        var q = condoSearchInput.value.trim();
+        clearTimeout(addressSearchTimer);
+        var wrap = document.getElementById("condoSearchResults");
+        if(q.length < 3){ if(wrap) wrap.innerHTML = ""; return; }
+        addressSearchTimer = setTimeout(function(){ searchAddress(q); }, 600);
+      });
+    }
 
     var condoForm = document.getElementById("condoForm");
     if(condoForm){
