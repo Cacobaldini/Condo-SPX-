@@ -5,6 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Condo SPX</title>
 <link rel="manifest" href="manifest.json">
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-H1RK39V422"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-H1RK39V422');
+</script>
 <meta name="theme-color" content="#101B18">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -573,6 +581,7 @@
       saveJSON("cde_session", state.session);
       state.authError = "";
       state.view = "cities";
+      if(window.gtag) gtag('event', 'sign_up');
       return render();
     }
 
